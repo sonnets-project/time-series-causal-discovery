@@ -12,7 +12,7 @@ class CSVViewer:
     def __init__(self, master):
         self.pos = None
         self.master = master
-        self.master.title("CSV Viewer")
+        self.master.title("Causal relationships in S&P 100 (500-day window)")
         
         # Initialize the figure attribute
         self.figure = Figure(figsize=(14, 8))
@@ -59,7 +59,7 @@ class CSVViewer:
         file_path = os.path.join(self.folder_path, self.csv_files[index])
         
         try:
-            array = pd.read_csv(file_path, header=None).values
+            array = pd.read_csv(file_path, header=None).values.T
             quantile_value = np.quantile(array, 0.99)
             array[array < quantile_value] = 0
             G = nx.DiGraph(array)

@@ -1,10 +1,10 @@
-# Time series causal discovery
+# Time Series Causal Discovery
 
 ## GUI
-Assuming that 
+To launch the GUI, run:
 ```bash
-python3 gui.py
+python3 demo-gui.py
 ```
 
 ## Planned Improvements
-* Add alerts when structural changes take places
+* Add alerts when structural changes take place
