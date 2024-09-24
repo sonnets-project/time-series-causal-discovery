@@ -1,10 +1,10 @@
 # Time series causal discovery
 
-TODO:
-* Link Timino, tsFCI and QCA
-
-## Example call
-Causal discovery for dairy price data using VARLiNGAM
+## GUI
+Assuming that 
 ```bash
-python run_causal_discovery.py data/dairy-raw.csv 2 dairy varlingam
+python3 gui.py
 ```
+
+## Planned Improvements
+* Add alerts when structural changes take places
