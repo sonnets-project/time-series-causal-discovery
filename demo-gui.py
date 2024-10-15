@@ -97,11 +97,11 @@ class CSVViewer:
         
         try:
             array = pd.read_csv(file_path, header=None).values.T
-            display_threshold = 0.3
-            array[array < display_threshold] = 0
+            quantile_value = np.quantile(array, 0.98)
+            array[array < quantile_value] = 0
             G = nx.DiGraph(array)
             if self.pos is None:
-                self.pos = nx.spring_layout(G, k=0.5)
+                self.pos = nx.spring_layout(G, k=0.4)
             pos = self.pos
             
             # Clear the figure before drawing the new frame
@@ -109,19 +109,22 @@ class CSVViewer:
             
             fig = self.figure
             ax = fig.add_subplot(111)
-            
-            # Draw nodes
-            nx.draw_networkx_nodes(G, pos, ax=ax, node_size=300, node_color='none')
-            nx.draw_networkx_labels(G, pos, ax=ax, labels=dict(enumerate(self.node_labels)), font_size=8)
-            
-            # Draw edges with transparency based on weight
-            edge_colors = []
-            for (u, v, d) in G.edges(data=True):
-                weight = d['weight']
-                alpha = min(weight, 1.0)  # Cap alpha at 1.0
-                edge_colors.append((0, 0, 1, alpha))  # RGBA: Blue with variable alpha
-            
-            nx.draw_networkx_edges(G, pos, ax=ax, edge_color=edge_colors, arrows=True)
+
+            # Identify top 10 most influential nodes
+            top_nodes = sorted(G.out_degree, key=lambda x: x[1], reverse=True)[:10]  # Changed from 5 to 10
+            top_node_indices = [node for node, _ in top_nodes]
+
+            # Prepare node colors
+            node_colors = ['#FF6347' if i in top_node_indices else '#E0E0E0' for i in range(len(G.nodes))]
+
+            # Prepare edge colors based on weights
+            edge_weights = [G[u][v]['weight'] for u, v in G.edges()]
+            max_weight = max(edge_weights) if edge_weights else 1  # Avoid division by zero
+            edge_colors = [plt.cm.Blues(weight / max_weight) for weight in edge_weights]  # Use a colormap
+
+            nx.draw(G, pos, ax=ax, with_labels=True, node_size=300, font_size=8, 
+                    edge_color=edge_colors, arrows=True, labels=dict(enumerate(self.node_labels)), 
+                    node_color=node_colors)
             
             # Adjust the margins
             fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
@@ -177,6 +180,8 @@ class CSVViewer:
 
 if __name__ == "__main__":
     root = tk.Tk()
-    root.geometry("1920x1080")  # Set initial size to 1024x768 pixels
+    root.geometry("1920x1080")
     app = CSVViewer(root)
     root.mainloop()
+    
+
