@@ -67,7 +67,8 @@ class CSVViewer:
         
         self.folder_path = os.path.join(os.getcwd(), 'matrices')
         self.csv_files = sorted([f for f in os.listdir(self.folder_path) if f.endswith('.csv')])
-        self.current_index = len(self.csv_files) - 1
+        self.current_index = 0  # Start from the first frame
+        self.top_nodes_history = {}  # Store top nodes for each frame
         
         # Read the header line from 'sp100.csv' to get node labels
         self.node_labels = []
@@ -97,36 +98,49 @@ class CSVViewer:
         
         try:
             array = pd.read_csv(file_path, header=None).values.T
-            quantile_value = np.quantile(array, 0.98)
+            quantile_value = np.quantile(array, 0.99)
             array[array < quantile_value] = 0
             G = nx.DiGraph(array)
             if self.pos is None:
-                self.pos = nx.spring_layout(G, k=0.4)
+                self.pos = nx.spring_layout(G, k=0.5)
             pos = self.pos
             
-            # Clear the figure before drawing the new frame
             self.figure.clf()
             
             fig = self.figure
             ax = fig.add_subplot(111)
 
-            # Identify top 10 most influential nodes
-            top_nodes = sorted(G.out_degree, key=lambda x: x[1], reverse=True)[:10]  # Changed from 5 to 10
-            top_node_indices = [node for node, _ in top_nodes]
+            # Identify top 10 most influential nodes for the current frame
+            top_nodes = sorted(G.out_degree, key=lambda x: x[1], reverse=True)[:10]
+            current_top_nodes = set(node for node, _ in top_nodes)
+            self.top_nodes_history[index] = current_top_nodes
 
-            # Prepare node colors
-            node_colors = ['#FF6347' if i in top_node_indices else '#E0E0E0' for i in range(len(G.nodes))]
+            # Get previous frame's top nodes
+            previous_top_nodes = self.top_nodes_history.get(index - 1, set())
 
-            # Prepare edge colors based on weights
+            # Prepare node colors and edge colors
+            node_colors = []
+            node_edge_colors = []
+            for i in range(len(G.nodes)):
+                if i in current_top_nodes:
+                    if i in previous_top_nodes:
+                        node_colors.append('white')
+                        node_edge_colors.append('red')
+                    else:
+                        node_colors.append('red')
+                        node_edge_colors.append('red')
+                else:
+                    node_colors.append('white')
+                    node_edge_colors.append('black')
+
             edge_weights = [G[u][v]['weight'] for u, v in G.edges()]
-            max_weight = max(edge_weights) if edge_weights else 1  # Avoid division by zero
-            edge_colors = [plt.cm.Blues(weight / max_weight) for weight in edge_weights]  # Use a colormap
+            max_weight = max(edge_weights) if edge_weights else 1
+            edge_colors = [plt.cm.Blues(weight / max_weight) for weight in edge_weights]
 
             nx.draw(G, pos, ax=ax, with_labels=True, node_size=300, font_size=8, 
                     edge_color=edge_colors, arrows=True, labels=dict(enumerate(self.node_labels)), 
-                    node_color=node_colors)
+                    node_color=node_colors, edgecolors=node_edge_colors, linewidths=2)
             
-            # Adjust the margins
             fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
             
             self.canvas.figure = fig
@@ -134,7 +148,6 @@ class CSVViewer:
             
             self.frame_id_label.config(text=f"Frame ID: {index + 1}")
             
-            # Update the tables with top 10 most influential nodes
             self.update_tables(G)
             
         except Exception as e:
