@@ -13,7 +13,7 @@ class CSVViewer:
     def __init__(self, master):
         self.pos = None
         self.master = master
-        self.master.title("Causal relationships in S&P 100 (500-day window)")
+        self.master.title("Causal relationships in S&P 100 (400-day window)")
         
         # Create a main frame to hold all widgets
         self.main_frame = tk.Frame(self.master)
@@ -27,34 +27,71 @@ class CSVViewer:
         self.right_frame = tk.Frame(self.main_frame, width=self.master.winfo_screenwidth() * 0.38)
         self.right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=1)
         
-        # Split right frame into upper and lower frames
-        self.right_upper_frame = tk.Frame(self.right_frame)
-        self.right_upper_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=1)
-        self.right_lower_frame = tk.Frame(self.right_frame)
-        self.right_lower_frame.pack(side=tk.BOTTOM, fill=tk.BOTH, expand=1)
+        # Split right frame into three parts with adjusted proportions
+        self.right_upper_frame = tk.Frame(self.right_frame, height=self.master.winfo_screenheight() * 0.27)  # 27% of height
+        self.right_upper_frame.pack(side=tk.TOP, fill=tk.BOTH)
+        self.right_upper_frame.pack_propagate(False)  # Prevent frame from shrinking
         
-        # Add caption for the upper table
-        self.upper_caption = tk.Label(self.right_upper_frame, text="Most influential nodes")
-        self.upper_caption.pack(side=tk.TOP)
+        self.right_middle_frame = tk.Frame(self.right_frame, height=self.master.winfo_screenheight() * 0.27)  # 27% of height
+        self.right_middle_frame.pack(side=tk.TOP, fill=tk.BOTH)
+        self.right_middle_frame.pack_propagate(False)  # Prevent frame from shrinking
         
-        # Create table in the upper right frame for outgoing edges
+        self.right_bottom_frame = tk.Frame(self.right_frame)  # Takes remaining space
+        self.right_bottom_frame.pack(side=tk.BOTTOM, fill=tk.BOTH, expand=1)
+        
+        # Upper frame - Most influential nodes caption with larger font
+        self.upper_caption = tk.Label(self.right_upper_frame, 
+                                    text="Most influential nodes (Top 10)", 
+                                    font=('Arial', 18, 'bold'))
+        self.upper_caption.pack(side=tk.TOP, pady=5)
+        
         self.tree_out = ttk.Treeview(self.right_upper_frame, columns=('Node', 'Effects'), show='headings')
         self.tree_out.heading('Node', text='Node')
         self.tree_out.heading('Effects', text='Effects')
-        self.tree_out.column('Node', width=40)  # Adjust width as needed
+        self.tree_out.column('Node', width=40)
         self.tree_out.pack(fill=tk.BOTH, expand=1)
         
-        # Add caption for the lower table
-        self.lower_caption = tk.Label(self.right_lower_frame, text="Most submissive nodes")
-        self.lower_caption.pack(side=tk.TOP)
+        # Middle frame - Least influential nodes caption with larger font
+        self.middle_caption = tk.Label(self.right_middle_frame, 
+                                     text="Least influential nodes (Bottom 10)", 
+                                     font=('Arial', 18, 'bold'))
+        self.middle_caption.pack(side=tk.TOP, pady=5)
         
-        # Create table in the lower right frame for incoming edges
-        self.tree_in = ttk.Treeview(self.right_lower_frame, columns=('Node', 'Causes'), show='headings')
-        self.tree_in.heading('Node', text='Node')
-        self.tree_in.heading('Causes', text='Causes')
-        self.tree_in.column('Node', width=40)  # Adjust width as needed
-        self.tree_in.pack(fill=tk.BOTH, expand=1)
+        self.tree_least = ttk.Treeview(self.right_middle_frame, columns=('Node', 'Effects'), show='headings')
+        self.tree_least.heading('Node', text='Node')
+        self.tree_least.heading('Effects', text='Effects')
+        self.tree_least.column('Node', width=40)
+        self.tree_least.pack(fill=tk.BOTH, expand=1)
         
+        # Bottom frame - Edge changes and statistics with larger font
+        self.edge_changes_label = tk.Label(self.right_bottom_frame, 
+                                         text="Causal Graph Statistics:", 
+                                         font=('Arial', 18, 'bold'))
+        self.edge_changes_label.pack(side=tk.TOP, pady=15)
+        
+        self.new_edges_label = tk.Label(self.right_bottom_frame, 
+                                      text="New Edges: 0", 
+                                      font=('Arial', 15))
+        self.new_edges_label.pack(side=tk.TOP, pady=8)
+        
+        self.removed_edges_label = tk.Label(self.right_bottom_frame, 
+                                          text="Removed Edges: 0", 
+                                          font=('Arial', 15))
+        self.removed_edges_label.pack(side=tk.TOP, pady=8)
+        
+        self.avg_out_edges_label = tk.Label(self.right_bottom_frame, 
+                                          text="Average Outgoing Edges: 0.00", 
+                                          font=('Arial', 15))
+        self.avg_out_edges_label.pack(side=tk.TOP, pady=8)
+        
+        self.avg_in_edges_label = tk.Label(self.right_bottom_frame, 
+                                         text="Average Incoming Edges: 0.00", 
+                                         font=('Arial', 15))
+        self.avg_in_edges_label.pack(side=tk.TOP, pady=8)
+
+        # Store previous frame's edges
+        self.previous_edges = set()
+
         # Initialize the figure attribute
         self.figure = Figure()  # Adjust figure size as needed
 
@@ -67,7 +104,7 @@ class CSVViewer:
         
         self.folder_path = os.path.join(os.getcwd(), 'matrices')
         self.csv_files = sorted([f for f in os.listdir(self.folder_path) if f.endswith('.csv')])
-        self.current_index = 0  # Start from the first frame
+        self.current_index = 700  # Start from the first frame
         self.top_nodes_history = {}  # Store top nodes for each frame
         
         # Read the header line from 'sp100.csv' to get node labels
@@ -98,10 +135,12 @@ class CSVViewer:
         
         try:
             array = pd.read_csv(file_path, header=None).values.T
-            quantile_value = np.quantile(array, 0.99)
+            # quantile_value = np.quantile(array, 0.99)
+            quantile_value = 0.43
             array[array < quantile_value] = 0
             G = nx.DiGraph(array)
             if self.pos is None:
+
                 self.pos = nx.spring_layout(G, k=0.5)
             pos = self.pos
             
@@ -150,36 +189,58 @@ class CSVViewer:
             
             self.update_tables(G)
             
+            # Track edge changes
+            current_edges = set(G.edges())
+            new_edges = len(current_edges - self.previous_edges)
+            removed_edges = len(self.previous_edges - current_edges)
+            
+            # Calculate average edges
+            out_degrees = [d for n, d in G.out_degree()]
+            in_degrees = [d for n, d in G.in_degree()]
+            avg_out = sum(out_degrees) / len(out_degrees) if out_degrees else 0
+            avg_in = sum(in_degrees) / len(in_degrees) if in_degrees else 0
+            
+            # Update labels
+            self.new_edges_label.config(text=f"New Edges: {new_edges}")
+            self.removed_edges_label.config(text=f"Removed Edges: {removed_edges}")
+            self.avg_out_edges_label.config(text=f"Average Outgoing Edges: {avg_out:.2f}")
+            self.avg_in_edges_label.config(text=f"Average Incoming Edges: {avg_in:.2f}")
+            
+            # Store current edges for next comparison
+            self.previous_edges = current_edges
+            
         except Exception as e:
             messagebox.showerror("Error", f"Failed to load and process CSV file\n{e}")
     
-    def update_tables(self, G, top_n=20):
+    def update_tables(self, G, top_n=10):
         # Clear existing items
-        for tree in [self.tree_out, self.tree_in]:
+        for tree in [self.tree_out, self.tree_least]:
             for i in tree.get_children():
                 tree.delete(i)
         
-        # Get top N nodes with most outgoing edges, considering average weight
+        # Get nodes with outgoing edges, considering average weight
         out_degree_with_avg = [(node, degree, np.mean([G[node][succ]['weight'] for succ in G.successors(node)])) 
                                for node, degree in G.out_degree()]
+        
+        # Top influential nodes
         top_nodes_out = sorted(out_degree_with_avg, key=lambda x: (x[1], x[2]), reverse=True)[:top_n]
         
+        # Least influential nodes
+        least_nodes_out = sorted(out_degree_with_avg, key=lambda x: (x[1], x[2]))[:top_n]
+        
+        # Update most influential nodes table
         for node, _, _ in top_nodes_out:
             node_label = self.node_labels[node]
             effects = sorted(G.successors(node), key=lambda x: G[node][x]['weight'], reverse=True)
             effect_labels = ', '.join([self.node_labels[e] for e in effects])
             self.tree_out.insert('', 'end', values=(node_label, effect_labels))
         
-        # Get top N nodes with most incoming edges, considering average weight
-        in_degree_with_avg = [(node, degree, np.mean([G[pred][node]['weight'] for pred in G.predecessors(node)])) 
-                              for node, degree in G.in_degree()]
-        top_nodes_in = sorted(in_degree_with_avg, key=lambda x: (x[1], x[2]), reverse=True)[:top_n]
-        
-        for node, _, _ in top_nodes_in:
+        # Update least influential nodes table
+        for node, _, _ in least_nodes_out:
             node_label = self.node_labels[node]
-            causes = sorted(G.predecessors(node), key=lambda x: G[x][node]['weight'], reverse=True)
-            cause_labels = ', '.join([self.node_labels[c] for c in causes])
-            self.tree_in.insert('', 'end', values=(node_label, cause_labels))
+            effects = sorted(G.successors(node), key=lambda x: G[node][x]['weight'], reverse=True)
+            effect_labels = ', '.join([self.node_labels[e] for e in effects])
+            self.tree_least.insert('', 'end', values=(node_label, effect_labels))
 
     def load_prev_frame(self):
         if self.current_index > 0:
