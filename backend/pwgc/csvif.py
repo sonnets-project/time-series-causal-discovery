@@ -1,17 +1,23 @@
+#!/usr/bin/env python3
+
 import argparse
 import numpy as np
 from common import granger_causality_matrix  # Import the function
 import os
-import networkx as nx  # Import NetworkX
+import networkx as nx
 import sys
+import time
 
-def process_csv(input_file, output_file=None, time_file=None, max_lags=5, significance_level=0.05, metric='is_causal'):
+def process_csv(input_file, output_file, time_file, weighted_edgelist_file, max_lags, significance_level, metric):
     # Read data
-    raw_data = np.genfromtxt(input_file, delimiter=',', skip_header=1)
-    headers = np.genfromtxt(input_file, delimiter=',', max_rows=1, dtype=str)  # Read header for variable names
+    if input_file == 'stdin':
+        raw_data = np.genfromtxt(sys.stdin, delimiter=',', skip_header=1)
+        headers = next(sys.stdin).strip().split(',')  # Read header for variable names
+    else:
+        raw_data = np.genfromtxt(input_file, delimiter=',', skip_header=1)
+        headers = np.genfromtxt(input_file, delimiter=',', max_rows=1, dtype=str)
     
     # Start timing
-    import time
     start_time = time.time()
     
     # Compute Granger causality matrix
@@ -35,35 +41,51 @@ def process_csv(input_file, output_file=None, time_file=None, max_lags=5, signif
     for i, row in enumerate(causality_matrix):
         for j, value in enumerate(row):
             if value:  # If there is a causal relationship
-                G.add_edge(headers[i], headers[j])
+                # Get the maximum F-statistic across all lags as the weight
+                _, _, f_stats = detailed_results[(i, j)]
+                weight = max(f_stats.values()) if f_stats else 0.0
+                G.add_edge(headers[i], headers[j], weight=weight)
 
-    # Export the graph
+    # Export weighted edgelist if requested
+    if weighted_edgelist_file:
+        nx.write_weighted_edgelist(G, weighted_edgelist_file)
+
+    # Export the graph (regular adjacency list)
     if output_file:
         nx.write_adjlist(G, output_file)
     else:
-        # If no output file is specified, write to stdout
         nx.write_adjlist(G, sys.stdout)
 
 def main():
     parser = argparse.ArgumentParser(description='Discover Granger causality relationships in time series data.')
-    parser.add_argument('-i', '--input', help='Input CSV file path (default: standard input)', default=None)
-    parser.add_argument('-o', '--output', help='Output file path (default: standard output)', default=None)
-    parser.add_argument('-t', '--time', help='Output file for computation time in seconds', default=None)
-    parser.add_argument('--max_lags', type=int, default=5, help='Maximum number of lags to test (default: 5)')
-    parser.add_argument('--significance_level', type=float, default=0.05, help='Significance level for the test (default: 0.05)')
-    parser.add_argument('--metric', type=str, default='is_causal', choices=['is_causal', 'min_pvalue', 'max_fstat'],
+    parser.add_argument('-i', '--input', default=None,
+                        help='Input CSV file path (default: standard input)')
+    parser.add_argument('-o', '--output', default=None,
+                        help='Output file path (default: standard output)')
+    parser.add_argument('-t', '--time', default=None,
+                        help='Output file for computation time in seconds')
+    parser.add_argument('--max_lags', type=int, default=5,
+                        help='Maximum number of lags to test (default: 5)')
+    parser.add_argument('--significance_level', type=float, default=0.05,
+                        help='Significance level for the test (default: 0.05)')
+    parser.add_argument('--metric', type=str, default='is_causal',
+                        choices=['is_causal', 'min_pvalue', 'max_fstat'],
                         help='Metric to use for the result matrix (default: is_causal)')
+    parser.add_argument('-w', '--weighted_edgelist', default=None,
+                        help='Output file for f-statistic weighted edgelist')
     
     args = parser.parse_args()
     
-    input_file = args.input if args.input else 'stdin'  # Use 'stdin' if no input file is provided
-    output_file = args.output  # Use provided output file or None for standard output
+    # Handle stdin properly
+    input_file = args.input if args.input else 'stdin'
+    
     process_csv(input_file, 
-                 output_file=output_file,
-                 time_file=args.time,
-                 max_lags=args.max_lags, 
-                 significance_level=args.significance_level, 
-                 metric=args.metric)
+                output_file=args.output,
+                time_file=args.time,
+                weighted_edgelist_file=args.weighted_edgelist,
+                max_lags=args.max_lags, 
+                significance_level=args.significance_level, 
+                metric=args.metric)
 
 if __name__ == "__main__":
     main()

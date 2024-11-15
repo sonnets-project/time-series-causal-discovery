@@ -21,7 +21,7 @@ def granger_causality_matrix(
         f_stats = {}
         for lag in range(1, max_lags + 1):
             p_values[lag] = test_results[lag][0]['ssr_chi2test'][1]
-            f_stats[lag] = test_results[lag][0].get('ssr_f', (None,))[0]
+            f_stats[lag] = test_results[lag][0]['ssr_ftest'][0]
         
         is_causal = any(p_value < significance_level for p_value in p_values.values())
         return is_causal, p_values, f_stats
