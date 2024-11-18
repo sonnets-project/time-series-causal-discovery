@@ -10,12 +10,8 @@ import time
 
 def process_csv(input_file, output_file, time_file, weighted_edgelist_file, max_lags, significance_level, metric):
     # Read data
-    if input_file == 'stdin':
-        raw_data = np.genfromtxt(sys.stdin, delimiter=',', skip_header=1)
-        headers = next(sys.stdin).strip().split(',')  # Read header for variable names
-    else:
-        raw_data = np.genfromtxt(input_file, delimiter=',', skip_header=1)
-        headers = np.genfromtxt(input_file, delimiter=',', max_rows=1, dtype=str)
+    raw_data = np.genfromtxt(input_file, delimiter=',', skip_header=1)
+    headers = np.genfromtxt(input_file, delimiter=',', max_rows=1, dtype=str)
     
     # Start timing
     start_time = time.time()
@@ -51,17 +47,14 @@ def process_csv(input_file, output_file, time_file, weighted_edgelist_file, max_
         nx.write_weighted_edgelist(G, weighted_edgelist_file)
 
     # Export the graph (regular adjacency list)
-    if output_file:
-        nx.write_adjlist(G, output_file)
-    else:
-        nx.write_adjlist(G, sys.stdout)
+    nx.write_adjlist(G, output_file)
 
 def main():
     parser = argparse.ArgumentParser(description='Discover Granger causality relationships in time series data.')
-    parser.add_argument('-i', '--input', default=None,
-                        help='Input CSV file path (default: standard input)')
-    parser.add_argument('-o', '--output', default=None,
-                        help='Output file path (default: standard output)')
+    parser.add_argument('-i', '--input', required=True,
+                        help='Input CSV file path')
+    parser.add_argument('-o', '--output', required=True,
+                        help='Output file path')
     parser.add_argument('-t', '--time', default=None,
                         help='Output file for computation time in seconds')
     parser.add_argument('--max_lags', type=int, default=5,
@@ -76,10 +69,7 @@ def main():
     
     args = parser.parse_args()
     
-    # Handle stdin properly
-    input_file = args.input if args.input else 'stdin'
-    
-    process_csv(input_file, 
+    process_csv(args.input, 
                 output_file=args.output,
                 time_file=args.time,
                 weighted_edgelist_file=args.weighted_edgelist,
