@@ -14,29 +14,6 @@ from statsmodels.nonparametric import bandwidths
 
 
 def hsic_test_gamma(X, Y, bw_method="mdbs"):
-    """get the HSIC statistic.
-
-    Parameters
-    ----------
-    X, Y : array-like, shape (n_samples, n_features)
-        Training data, where ``n_samples`` is the number of samples
-        and ``n_features`` is the number of features.
-
-    bw_method : str, optional (default=``mdbs``)
-        The method used to calculate the bandwidth of the HSIC.
-
-        * ``mdbs`` : Median distance between samples.
-        * ``scott`` : Scott's Rule of Thumb.
-        * ``silverman`` : Silverman's Rule of Thumb.
-
-    Returns
-    -------
-    test_stat : float
-        the HSIC statistic.
-
-    p : float
-        the HSIC p-value.
-    """
     X = X.reshape(-1, 1) if X.ndim == 1 else X
     Y = Y.reshape(-1, 1) if Y.ndim == 1 else Y
 
@@ -46,34 +23,27 @@ def hsic_test_gamma(X, Y, bw_method="mdbs"):
     elif bw_method == "silverman":
         width_x = bandwidths.bw_silverman(X)
         width_y = bandwidths.bw_silverman(Y)
-    # Get kernel width to median distance between points
     else:
         width_x = get_kernel_width(X)
         width_y = get_kernel_width(Y)
 
-    # these are slightly biased estimates of centered gram matrices
     K, Kc = get_gram_matrix(X, width_x)
     L, Lc = get_gram_matrix(Y, width_y)
 
-    # test statistic m*HSICb under H1
     n = X.shape[0]
     test_stat = hsic_teststat(Kc, Lc, n)
 
     var = (1 / 6 * Kc * Lc) ** 2
-    # second subtracted term is bias correction
     var = 1 / n / (n - 1) * (np.sum(var) - np.trace(var))
-    # variance under H0
     var = 72 * (n - 4) * (n - 5) / n / (n - 1) / (n - 2) / (n - 3) * var
 
     K[np.diag_indices(n)] = 0
     L[np.diag_indices(n)] = 0
     mu_X = 1 / n / (n - 1) * K.sum()
     mu_Y = 1 / n / (n - 1) * L.sum()
-    # mean under H0
     mean = 1 / n * (1 + mu_X * mu_Y - mu_X - mu_Y)
 
     alpha = mean**2 / var
-    # threshold for hsicArr*m
     beta = var * n / mean
     p = gamma.sf(test_stat, alpha, scale=beta)
 
@@ -682,7 +652,7 @@ def calculate_total_effect(adjacency_matrix, from_index, to_index, is_continuous
     return total_effect
 
 
-class _BaseLiNGAM(BootstrapMixin, metaclass=ABCMeta):
+class _BaseLiNGAM(metaclass=ABCMeta):
     """Base class for all LiNGAM algorithms."""
 
     def __init__(self, random_state=None):
@@ -778,9 +748,7 @@ class _BaseLiNGAM(BootstrapMixin, metaclass=ABCMeta):
         E = X - np.dot(self._adjacency_matrix, X.T).T
         p_values = np.zeros([n_features, n_features])
         for i, j in itertools.combinations(range(n_features), 2):
-            _, p_value = hsic_test_gamma(
-                np.reshape(E[:, i], [n_samples, 1]), np.reshape(E[:, j], [n_samples, 1])
-            )
+            _, p_value = hsic_test_gamma(np.reshape(E[:, i], [n_samples, 1]), np.reshape(E[:, j], [n_samples, 1]))
             p_values[i, j] = p_value
             p_values[j, i] = p_value
 
@@ -910,29 +878,21 @@ class DirectLiNGAM(_BaseLiNGAM):
         self : object
             Returns the instance itself.
         """
-        # Check parameters
         X = check_array(X)
         n_features = X.shape[1]
 
-        # Check prior knowledge
         if self._Aknw is not None:
             if (n_features, n_features) != self._Aknw.shape:
-                raise ValueError(
-                    "The shape of prior knowledge must be (n_features, n_features)"
-                )
+                raise ValueError("The shape of prior knowledge must be (n_features, n_features)")
             else:
-                # Extract all partial orders in prior knowledge matrix
                 if not self._apply_prior_knowledge_softly:
                     self._partial_orders = self._extract_partial_orders(self._Aknw)
 
-        # Causal discovery
         U = np.arange(n_features)
         K = []
         X_ = np.copy(X)
         if self._measure == "pwling_v2" or self._measure == "pwling_v3":
-            # Standardize all features once before the loop
             X_ = (X - np.mean(X, axis=0)) / np.std(X, axis=0)
-            # X_residuals = self._precompute_residuals(X_)
             start_time = time.time()
             X_entropies = self._precompute_entropies(X_)
             X_residuals_entropies = self._precompute_residual_entropies(X_)
@@ -943,7 +903,6 @@ class DirectLiNGAM(_BaseLiNGAM):
         print("Measure method:", self._measure)
         
 
-        # Causal ordering        
         start_time = time.time()
         if self._measure != "pwling_v3":
             for _ in range(n_features):
@@ -958,11 +917,8 @@ class DirectLiNGAM(_BaseLiNGAM):
                             X_[:, i] = self._residual(X_[:, i], X_[:, m])
                 K.append(m)
                 U = U[U != m]
-                # Update partial orders
                 if (self._Aknw is not None) and (not self._apply_prior_knowledge_softly):
-                    self._partial_orders = self._partial_orders[
-                        self._partial_orders[:, 0] != m
-                    ]
+                    self._partial_orders = self._partial_orders[self._partial_orders[:, 0] != m]
         else:
             M_list = []
             for i in U:
@@ -980,8 +936,6 @@ class DirectLiNGAM(_BaseLiNGAM):
         self._causal_order = K
 
         start_time = time.time()
-
-        # Estimate adjacency matrix
         self._estimate_adjacency_matrix(X, prior_knowledge=self._Aknw)
         end_time = time.time()
         execution_time = end_time - start_time
@@ -989,21 +943,15 @@ class DirectLiNGAM(_BaseLiNGAM):
         return self
 
     def _extract_partial_orders(self, pk):
-        """Extract partial orders from prior knowledge."""
         path_pairs = np.array(np.where(pk == 1)).transpose()
         no_path_pairs = np.array(np.where(pk == 0)).transpose()
 
-        # Check for inconsistencies in pairs with path
         check_pairs = np.concatenate([path_pairs, path_pairs[:, [1, 0]]])
         if len(check_pairs) > 0:
             pairs, counts = np.unique(check_pairs, axis=0, return_counts=True)
             if len(pairs[counts > 1]) > 0:
-                raise ValueError(
-                    f"The prior knowledge contains inconsistencies at the following indices: {pairs[counts>1].tolist()}"
-                )
+                raise ValueError(f"The prior knowledge contains inconsistencies at the following indices: {pairs[counts>1].tolist()}")
 
-        # Check for inconsistencies in pairs without path.
-        # If there are duplicate pairs without path, they cancel out and are not ordered.
         check_pairs = np.concatenate([no_path_pairs, no_path_pairs[:, [1, 0]]])
         if len(check_pairs) > 0:
             pairs, counts = np.unique(check_pairs, axis=0, return_counts=True)
@@ -1013,77 +961,77 @@ class DirectLiNGAM(_BaseLiNGAM):
 
         check_pairs = np.concatenate([path_pairs, no_path_pairs[:, [1, 0]]])
         if len(check_pairs) == 0:
-            # If no pairs are extracted from the specified prior knowledge,
             return check_pairs
 
         pairs = np.unique(check_pairs, axis=0)
-        return pairs[:, [1, 0]]  # [to, from] -> [from, to]
-
-    # def _precompute_residuals(self, X_std):
-    #     n_features = X_std.shape[1]
-    #     residuals = np.zeros((X_std.shape[0], n_features, n_features))
-
-    #     for i in range(n_features):
-    #         for j in range(n_features):
-    #             if i != j:
-    #                 residuals[:, i, j] = X_std[:, i] - (np.cov(X_std[:, i], X_std[:, j], bias=True)[0, 1] / np.var(X_std[:, j])) * X_std[:, j]
-        
-    #     return residuals
+        return pairs[:, [1, 0]]
 
     def _precompute_entropies(self, X_std):
         n_features = X_std.shape[1]
         X_entropy = np.zeros(n_features) 
         
-        for i in range(n_features):
-            X_entropy[i] = self._entropy(X_std[:, i])
+        u = X_std
+        k1 = 79.047
+        k2 = 7.4129
+        gamma = 0.37457
+        
+        log_cosh = np.log(np.cosh(u))
+        exp_term = u * np.exp(-(u ** 2) / 2)
+        
+        X_entropy = (1 + np.log(2 * np.pi)) / 2 - \
+                    k1 * (np.mean(log_cosh, axis=0) - gamma) ** 2 - \
+                    k2 * (np.mean(exp_term, axis=0)) ** 2
         
         return X_entropy
 
     def _precompute_residual_entropies(self, X_):
         n_features = X_.shape[1]
+        n_samples = X_.shape[0]
         X_entropy = np.zeros((n_features, n_features))
-
+        
+        variances = np.var(X_, axis=0)
+        covariances = np.cov(X_.T, bias=True)
+        
         for i in range(n_features):
             for j in range(n_features):
-                if i != j: 
-                    residual = self._residual(X_[:, i], X_[:, j])
-                    residual_std = residual / np.std(residual) 
-                    X_entropy[i, j] = self._entropy(residual_std) 
-
+                if i != j:
+                    beta = covariances[i, j] / variances[j]
+                    residual = X_[:, i] - beta * X_[:, j]
+                    residual_std = residual / np.std(residual)
+                    
+                    u = residual_std
+                    k1 = 79.047
+                    k2 = 7.4129
+                    gamma = 0.37457
+                    
+                    log_cosh_mean = np.mean(np.log(np.cosh(u)))
+                    exp_term_mean = np.mean(u * np.exp(-(u ** 2) / 2))
+                    
+                    X_entropy[i, j] = (1 + np.log(2 * np.pi)) / 2 - \
+                                     k1 * (log_cosh_mean - gamma) ** 2 - \
+                                     k2 * exp_term_mean ** 2
+        
         return X_entropy
 
-
     def _residual(self, xi, xj):
-        """The residual when xi is regressed on xj."""
         return xi - (np.cov(xi, xj, bias=True)[0, 1] / np.var(xj)) * xj
 
     def _entropy(self, u):
-        """Calculate entropy using the maximum entropy approximations."""
         k1 = 79.047
         k2 = 7.4129
         gamma = 0.37457
-        return (1 + np.log(2 * np.pi)) / 2 - k1 * (
-            np.mean(np.log(np.cosh(u))) - gamma) ** 2 - k2 * (np.mean(u * np.exp((-(u ** 2)) / 2))) ** 2
+        return (1 + np.log(2 * np.pi)) / 2 - k1 * (np.mean(np.log(np.cosh(u))) - gamma) ** 2 - k2 * (np.mean(u * np.exp((-(u ** 2)) / 2))) ** 2
 
     def _diff_mutual_info(self, xi_std, xj_std, ri_j, rj_i):
-        """Calculate the difference of the mutual informations."""
-        return (self._entropy(xj_std) + self._entropy(ri_j / np.std(ri_j))) - (
-            self._entropy(xi_std) + self._entropy(rj_i / np.std(rj_i))
-        )
+        return (self._entropy(xj_std) + self._entropy(ri_j / np.std(ri_j))) - (self._entropy(xi_std) + self._entropy(rj_i / np.std(rj_i)))
     
     def _diff_mutual_info_v2(self, X_entropies, X_residual_entropies, i, j):
-        """Calculate the difference of the mutual informations."""
-        return (X_entropies[j] + X_residual_entropies[i][j]) - (
-            X_entropies[i] + X_residual_entropies[j][i]
-        )
+        return (X_entropies[j] + X_residual_entropies[i][j]) - (X_entropies[i] + X_residual_entropies[j][i])
 
     def _search_candidate(self, U):
-        """Search for candidate features"""
-        # If no prior knowledge is specified, nothing to do.
         if self._Aknw is None:
             return U, []
 
-        # Apply prior knowledge in a strong way
         if not self._apply_prior_knowledge_softly:
             if len(self._partial_orders) != 0:
                 Uc = [i for i in U if i not in self._partial_orders[:, 1]]
@@ -1091,14 +1039,12 @@ class DirectLiNGAM(_BaseLiNGAM):
             else:
                 return U, []
 
-        # Find exogenous features
         Uc = []
         for j in U:
             index = U[U != j]
             if self._Aknw[j][index].sum() == 0:
                 Uc.append(j)
 
-        # Find endogenous features, and then find candidate features
         if len(Uc) == 0:
             U_end = []
             for j in U:
@@ -1106,14 +1052,12 @@ class DirectLiNGAM(_BaseLiNGAM):
                 if np.nansum(self._Aknw[j][index]) > 0:
                     U_end.append(j)
 
-            # Find sink features (original)
             for i in U:
                 index = U[U != i]
                 if self._Aknw[index, i].sum() == 0:
                     U_end.append(i)
             Uc = [i for i in U if i not in set(U_end)]
 
-        # make V^(j)
         Vj = []
         for i in U:
             if i in Uc:
@@ -1123,7 +1067,6 @@ class DirectLiNGAM(_BaseLiNGAM):
         return Uc, Vj
 
     def _search_causal_order(self, X, U):
-        """Search the causal ordering."""
         Uc, Vj = self._search_candidate(U)
         if len(Uc) == 1:
             return Uc[0]
@@ -1135,57 +1078,21 @@ class DirectLiNGAM(_BaseLiNGAM):
                 if i != j:
                     xi_std = (X[:, i] - np.mean(X[:, i])) / np.std(X[:, i])
                     xj_std = (X[:, j] - np.mean(X[:, j])) / np.std(X[:, j])
-                    ri_j = (
-                        xi_std
-                        if i in Vj and j in Uc
-                        else self._residual(xi_std, xj_std)
-                    )
-                    rj_i = (
-                        xj_std
-                        if j in Vj and i in Uc
-                        else self._residual(xj_std, xi_std)
-                    )
+                    ri_j = xi_std if i in Vj and j in Uc else self._residual(xi_std, xj_std)
+                    rj_i = xj_std if j in Vj and i in Uc else self._residual(xj_std, xi_std)
                     M += np.min([0, self._diff_mutual_info(xi_std, xj_std, ri_j, rj_i)]) ** 2
             M_list.append(-1.0 * M)
         return Uc[np.argmax(M_list)]
     
-    def _search_causal_order_v2(self, U, X_std_entropies, X_residuals_entropies):
+    def _search_causal_order_v2(self, U, X_entropies, X_residuals_entropies):
         M_list = []
         for i in U:
-            # Directly use the pre-standardized data
-            # xi_std = X_std[:, i]  
             M = 0
             for j in U:
                 if i != j:
-                    # Directly use the pre-standardized data
-                    # xj_std = X_std[:, j]  
-                    # Directly use the pre-computed residuals
-                    # rj_i = xj_std if j in Vj and i in Uc else residuals[:, j, i]
-                    # ri_j = xi_std if i in Vj and j in Uc else residuals[:, i, j]  
-                    M += np.min([0, self._diff_mutual_info_v2(X_std_entropies, X_residuals_entropies, i, j)]) ** 2
+                    M += np.min([0, self._diff_mutual_info_v2(X_entropies, X_residuals_entropies, i, j)]) ** 2
             M_list.append(-1.0 * M)
         return U[np.argmax(M_list)]
-
-    def _mutual_information(self, x1, x2, param):
-        """Calculate the mutual informations."""
-        kappa, sigma = param
-        n = len(x1)
-        X1 = np.tile(x1, (n, 1))
-        K1 = np.exp(-1 / (2 * sigma ** 2) * (X1 ** 2 + X1.T ** 2 - 2 * X1 * X1.T))
-        X2 = np.tile(x2, (n, 1))
-        K2 = np.exp(-1 / (2 * sigma ** 2) * (X2 ** 2 + X2.T ** 2 - 2 * X2 * X2.T))
-
-        tmp1 = K1 + n * kappa * np.identity(n) / 2
-        tmp2 = K2 + n * kappa * np.identity(n) / 2
-        K_kappa = np.r_[np.c_[tmp1 @ tmp1, K1 @ K2], np.c_[K2 @ K1, tmp2 @ tmp2]]
-        D_kappa = np.r_[
-            np.c_[tmp1 @ tmp1, np.zeros([n, n])], np.c_[np.zeros([n, n]), tmp2 @ tmp2]
-        ]
-
-        sigma_K = np.linalg.svd(K_kappa, compute_uv=False)
-        sigma_D = np.linalg.svd(D_kappa, compute_uv=False)
-
-        return (-1 / 2) * (np.sum(np.log(sigma_K)) - np.sum(np.log(sigma_D)))
 
 
 
@@ -1604,111 +1511,3 @@ class VARLiNGAM:
             Residuals of regression, where n_samples is the number of samples.
         """
         return self._residuals
-
-
-class VARBootstrapResult(BootstrapResult):
-    """The result of bootstrapping for Time series algorithm."""
-
-    def __init__(self, adjacency_matrices, total_effects):
-        """Construct a BootstrapResult.
-
-        Parameters
-        ----------
-        adjacency_matrices : array-like, shape (n_sampling)
-            The adjacency matrix list by bootstrapping.
-        total_effects : array-like, shape (n_sampling)
-            The total effects list by bootstrapping.
-        """
-        super().__init__(adjacency_matrices, total_effects)
-
-    def get_paths(
-        self, from_index, to_index, from_lag=0, to_lag=0, min_causal_effect=None
-    ):
-        """Get all paths from the start variable to the end variable and their bootstrap probabilities.
-
-        Parameters
-        ----------
-        from_index : int
-            Index of the variable at the start of the path.
-        to_index : int
-            Index of the variable at the end of the path.
-        from_lag : int
-            Number of lag at the start of the path.
-            ``from_lag`` should be greater than or equal to ``to_lag``.
-        to_lag : int
-            Number of lag at the end of the path.
-            ``from_lag`` should be greater than or equal to ``to_lag``.
-        min_causal_effect : float, optional (default=None)
-            Threshold for detecting causal direction.
-            Causal directions with absolute values of causal effects less than ``min_causal_effect`` are excluded.
-
-        Returns
-        -------
-        paths : dict
-            List of path and bootstrap probability.
-            The dictionary has the following format::
-
-            {'path': [n_paths], 'effect': [n_paths], 'probability': [n_paths]}
-
-            where ``n_paths`` is the number of paths.
-        """
-        # check parameters
-        if min_causal_effect is None:
-            min_causal_effect = 0.0
-        else:
-            if not 0.0 < min_causal_effect:
-                raise ValueError("min_causal_effect must be an value greater than 0.")
-        if to_lag > from_lag:
-            raise ValueError("from_lag should be greater than or equal to to_lag.")
-        if to_lag == from_lag:
-            if to_index == from_index:
-                raise ValueError("The same variable is specified for from and to.")
-
-        # Find all paths from from_index to to_index
-        paths_list = []
-        effects_list = []
-        for am in self._adjacency_matrices:
-            expansion_m = np.zeros((am.shape[1], am.shape[1]))
-            n_features = am.shape[0]
-            n_lags = int(am.shape[1] / am.shape[0]) - 1
-            for i in range(n_lags + 1):
-                for j in range(i, n_lags + 1):
-                    row = n_features * i
-                    col = n_features * j
-                    lag = col - row
-                    expansion_m[row : row + n_features, col : col + n_features] = am[
-                        0:n_features, lag : lag + n_features
-                    ]
-            paths, effects = find_all_paths(
-                expansion_m,
-                int(n_features * from_lag + from_index),
-                int(n_features * to_lag + to_index),
-                min_causal_effect,
-            )
-
-            # Convert path to string to make them easier to handle.
-            paths_list.extend(["_".join(map(str, p)) for p in paths])
-            effects_list.extend(effects)
-
-        paths_list = np.array(paths_list)
-        effects_list = np.array(effects_list)
-
-        # Count paths
-        paths_str, counts = np.unique(paths_list, axis=0, return_counts=True)
-
-        # Sort by count
-        order = np.argsort(-counts)
-        probs = counts[order] / len(self._adjacency_matrices)
-        paths_str = paths_str[order]
-
-        # Calculate median of causal effect for each path
-        effects = [
-            np.median(effects_list[np.where(paths_list == p)]) for p in paths_str
-        ]
-
-        result = {
-            "path": [[int(i) for i in p.split("_")] for p in paths_str],
-            "effect": effects,
-            "probability": probs.tolist(),
-        }
-        return result
