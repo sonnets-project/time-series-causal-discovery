@@ -154,6 +154,12 @@ def main():
         for edge in minilingam_graph.edges():
             if not fastlingam_graph.has_edge(*edge):
                 print(f"{edge[0]} -> {edge[1]}")
+                
+        # Clean up the output files
+        if fastlingam_output and Path(fastlingam_output).exists():
+            Path(fastlingam_output).unlink()
+        if minilingam_output and Path(minilingam_output).exists():
+            Path(minilingam_output).unlink()
     else:
         print("Error: Failed to load one or both graphs")
 
