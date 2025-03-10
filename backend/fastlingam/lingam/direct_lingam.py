@@ -102,7 +102,7 @@ class DirectLiNGAM(_BaseLiNGAM):
             X_residuals_entropies = self._precompute_residual_entropies(X_)
             end_time = time.time()
             execution_time = end_time - start_time
-            print("precomputation Execution time:", execution_time, "seconds")
+            print("Precomputation time:", execution_time, "seconds")
 
         print("Measure method:", self._measure)
         
@@ -131,7 +131,7 @@ class DirectLiNGAM(_BaseLiNGAM):
                 ]
         end_time = time.time()
         execution_time = end_time - start_time
-        print("search causal order Execution time:", execution_time, "seconds")
+        print("Causal ordering time:", execution_time, "seconds")
 
         self._causal_order = K
 
@@ -139,7 +139,7 @@ class DirectLiNGAM(_BaseLiNGAM):
         self._estimate_adjacency_matrix(X, prior_knowledge=self._Aknw)
         end_time = time.time()
         execution_time = end_time - start_time
-        print("estimate adjacency matrix Execution time:", execution_time, "seconds")
+        print("Adjacency matrix estimation time:", execution_time, "seconds")
         return self
 
     def _extract_partial_orders(self, pk):

@@ -37,8 +37,8 @@ def process_csv(input_file, output_file, time_file, weighted_edgelist_file, max_
         headers = np.genfromtxt(input_file, delimiter=',', max_rows=1, dtype=str)
     
     # Process data (calculate returns)
-    data = (raw_data[1:] / raw_data[:-1]) - 1
-    
+    # data = (raw_data[1:] / raw_data[:-1]) - 1
+    data = raw_data
     # Start timing
     start_time = time.time()
     

@@ -25,13 +25,17 @@ def main():
                         help='Maximum number of lags to consider (default: 1)')
     parser.add_argument('-l', '--weight_threshold', type=float, default=0.05,
                         help='Lowest weight to be considered as an edge (default: 0.05)')
-    parser.add_argument('--measure', type=str, default='pwling_v2', choices=['pwling', 'pwling_v2', 'pwling_v3'],
-                      help='LiNGAM measure to use (default: pwling_v2)')
+    
+    # Show help if no arguments are given
+    if len(sys.argv) == 1:
+        parser.print_help(sys.stderr)
+        sys.exit(1)
+        
     args = parser.parse_args()
     analyze_csv_data(args.input, args.output, args.time, args.weighted_edgelist, 
-                    args.max_lags, args.weight_threshold, args.measure)
+                    args.max_lags, args.weight_threshold)
 
-def analyze_csv_data(input_file, output_file, time_file, weighted_edgelist_file, max_lags, weight_threshold, measure):
+def analyze_csv_data(input_file, output_file, time_file, weighted_edgelist_file, max_lags, weight_threshold):
     if input_file == 'stdin':
         raw_data = np.genfromtxt(sys.stdin, delimiter=',', skip_header=1)
         headers = next(sys.stdin).strip().split(',')
@@ -39,9 +43,9 @@ def analyze_csv_data(input_file, output_file, time_file, weighted_edgelist_file,
         raw_data = np.genfromtxt(input_file, delimiter=',', skip_header=1)
         headers = np.genfromtxt(input_file, delimiter=',', max_rows=1, dtype=str)
     
-    data = (raw_data[1:] / raw_data[:-1]) - 1
+    data = raw_data
     start_time = time.time()
-    summary_matrix = compute_causal_matrix(data, max_lags, measure)
+    summary_matrix = compute_causal_matrix(data, max_lags)
     computation_time = time.time() - start_time
     
     if time_file:
@@ -66,55 +70,67 @@ def analyze_csv_data(input_file, output_file, time_file, weighted_edgelist_file,
     else:
         nx.write_adjlist(G, sys.stdout)
 
-def compute_causal_matrix(data: np.ndarray, max_lags: int, measure: str) -> np.ndarray:
+def compute_causal_matrix(data: np.ndarray, max_lags: int) -> np.ndarray:
     """Calculate the summary matrix using DirectLiNGAM for time series data."""
+    # Time VAR procedure
+    var_start = time.time()
     var = VAR(data)
     result = var.fit(maxlags=max_lags, trend="n")
     residuals = result.resid
+    var_time = time.time() - var_start
+    print(f'VAR time: {var_time:.6f} seconds')
     
-    causal_order, adjacency_matrix = analyze_direct_lingam(residuals, measure=measure)
-    print('Causal order:', causal_order)
+    # Time DirectLiNGAM procedure
+    lingam_start = time.time()
+    causal_order = analyze_direct_lingam(residuals)
     
-    summary_matrix = np.abs(adjacency_matrix).transpose()
+    # Compute adjacency matrix (only once now)
+    B = np.zeros([residuals.shape[1], residuals.shape[1]], dtype="float64")
+    for i in range(1, len(causal_order)):
+        target = causal_order[i]
+        predictors = causal_order[:i]
+        if len(predictors) > 0:
+            B[target, predictors] = compute_adaptive_lasso(residuals, predictors, target)
+    
+    lingam_time = time.time() - lingam_start
+    print(f'DirectLiNGAM time: {lingam_time:.6f} seconds')
+    
+    summary_matrix = np.abs(B).transpose()
     np.fill_diagonal(summary_matrix, 0)
     return summary_matrix
 
-def analyze_direct_lingam(X, measure="pwling"):
+def analyze_direct_lingam(X):
     """Fit DirectLiNGAM to the data."""
     X = check_array(X)
     n_features = X.shape[1]
-    U = np.arange(n_features)
+    U = set(range(n_features))  # Use set for O(1) removal
     K = []
     
-    X_ = np.copy(X)
-    X_ = (X_ - np.mean(X_, axis=0)) / np.std(X_, axis=0)
+    # Standardize X once
+    X_ = (X - np.mean(X, axis=0)) / np.std(X, axis=0)
     
+    # Compute these once outside the loop
     entropies = compute_variable_entropies(X_)
     residual_entropies = compute_residual_entropies(X_)
 
-    for _ in range(n_features):
-        M_list = []
-        for i in U:
-            M = 0
-            for j in U:
-                if i != j:
-                    M += min([0, compute_mutual_info_diff(entropies, residual_entropies, i, j)]) ** 2
-            M_list.append(-M)
-        m = U[np.argmax(M_list)]
+    while U:  # Simplified loop condition
+        M_array = np.zeros(len(U))
+        U_list = list(U)  # Convert to list for indexing
+        
+        for idx, i in enumerate(U_list):
+            # Vectorized computation of M
+            j_values = np.array([j for j in U_list if j != i])
+            if len(j_values) > 0:
+                diffs = np.array([compute_mutual_info_diff(entropies, residual_entropies, i, j) 
+                                for j in j_values])
+                M_array[idx] = -np.sum(np.minimum(0, diffs) ** 2)
+        
+        m_idx = np.argmax(M_array)
+        m = U_list[m_idx]
         K.append(m)
-        U = U[U != m]
-
-    B = compute_adjacency_matrix(X, K)
-    return K, B
-
-def analyze_var_lingam(X, lags=1, criterion="bic", prune=True, lingam_measure='pwling'):
-    """Main function that combines VAR and LiNGAM analysis."""
-    M_taus, lags, residuals = estimate_var_coefficients(X, lags, criterion)
-    causal_order, adjacency_matrix = analyze_direct_lingam(residuals, measure=lingam_measure)
-    B_taus = compute_b_matrices(X, adjacency_matrix, M_taus)
-    if prune:
-        B_taus = prune_matrices(X, B_taus, causal_order, lags)
-    return causal_order, B_taus, residuals
+        U.remove(m)
+    
+    return K
 
 def compute_variable_entropies(X_std):
     """Calculate entropies for each variable."""
@@ -124,49 +140,36 @@ def compute_variable_entropies(X_std):
     return (1 + np.log(2 * np.pi)) / 2 - k1 * (np.mean(log_cosh, axis=0) - gamma) ** 2 - k2 * (np.mean(exp_term, axis=0)) ** 2
 
 def compute_residual_entropies(X_):
-    """Calculate residual entropies between pairs of variables."""
+    """Calculate residual entropies between pairs of variables using vectorized operations."""
     n_features = X_.shape[1]
     variances = np.var(X_, axis=0)
     covariances = np.cov(X_.T, bias=True)
     X_entropy = np.zeros((n_features, n_features))
     k1, k2, gamma = 79.047, 7.4129, 0.37457
     
-    for i, j in itertools.product(range(n_features), range(n_features)):
-        if i != j:
-            beta = covariances[i, j] / variances[j]
-            residual_std = (X_[:, i] - beta * X_[:, j]) / np.std(X_[:, i] - beta * X_[:, j])
-            log_cosh_mean = np.mean(np.log(np.cosh(residual_std)))
-            exp_term_mean = np.mean(residual_std * np.exp(-(residual_std ** 2) / 2))
-            X_entropy[i, j] = (1 + np.log(2 * np.pi)) / 2 - k1 * (log_cosh_mean - gamma) ** 2 - k2 * exp_term_mean ** 2
+    # Compute all betas at once
+    betas = covariances / variances[None, :]
+    np.fill_diagonal(betas, 0)  # Avoid division by zero
+    
+    # Vectorized computation for all pairs
+    for i in range(n_features):
+        for j in range(n_features):
+            if i != j:
+                residual = X_[:, i] - betas[i, j] * X_[:, j]
+                residual_std = residual / np.std(residual)
+                
+                log_cosh_mean = np.mean(np.log(np.cosh(residual_std)))
+                exp_term_mean = np.mean(residual_std * np.exp(-(residual_std ** 2) / 2))
+                
+                X_entropy[i, j] = ((1 + np.log(2 * np.pi)) / 2 - 
+                                 k1 * (log_cosh_mean - gamma) ** 2 - 
+                                 k2 * exp_term_mean ** 2)
+    
     return X_entropy
 
 def compute_mutual_info_diff(entropies, residual_entropies, i, j):
     """Calculate the difference in mutual information."""
     return (entropies[j] + residual_entropies[i][j]) - (entropies[i] + residual_entropies[j][i])
-
-def estimate_var_coefficients(X, lags=1, criterion="bic"):
-    """Estimate VAR coefficients using the specified criterion."""
-    var = VAR(X)
-    if criterion not in ["aic", "fpe", "hqic", "bic"]:
-        result = var.fit(maxlags=lags, trend="n")
-        return result.coefs, result.k_ar, result.resid
-    
-    min_value = float("Inf")
-    result = None
-    for lag in range(1, lags + 1):
-        fitted = var.fit(maxlags=lag, ic=None, trend="n")
-        value = getattr(fitted, criterion)
-        if value < min_value:
-            min_value, result = value, fitted
-    return result.coefs, result.k_ar, result.resid
-
-def compute_b_matrices(X, B0, M_taus):
-    """Calculate B matrices from VAR coefficients and DirectLiNGAM adjacency matrix."""
-    n_features = X.shape[1]
-    B_taus = np.array([B0])
-    for M in M_taus:
-        B_taus = np.append(B_taus, [np.dot((np.eye(n_features) - B0), M)], axis=0)
-    return B_taus
 
 def compute_adaptive_lasso(X, predictors, target, gamma=1.0):
     """Predict using adaptive lasso regression."""
@@ -186,38 +189,12 @@ def compute_adaptive_lasso(X, predictors, target, gamma=1.0):
         coef[pruned_idx] = lr.coef_
     return coef
 
-def compute_adjacency_matrix(X, causal_order):
-    """Estimate the adjacency matrix using adaptive lasso."""
-    B = np.zeros([X.shape[1], X.shape[1]], dtype="float64")
-    for i in range(1, len(causal_order)):
-        target = causal_order[i]
-        predictors = causal_order[:i]
-        if len(predictors) > 0:
-            B[target, predictors] = compute_adaptive_lasso(X, predictors, target)
-    return B
-
-def prune_matrices(X, B_taus, causal_order, lags):
-    """Prune the B matrices using adaptive lasso."""
+def compute_b_matrices(X, B0, M_taus):
+    """Calculate B matrices from VAR coefficients and DirectLiNGAM adjacency matrix."""
     n_features = X.shape[1]
-    stacked = [np.flip(X, axis=0)]
-    for i in range(lags):
-        stacked.append(np.roll(stacked[-1], -1, axis=0))
-    blocks = np.array(list(zip(*stacked)))[: -lags]
-    for i in range(n_features):
-        causal_order_no = causal_order.index(i)
-        ancestor_indexes = causal_order[:causal_order_no]
-        obj = np.zeros((len(blocks)))
-        exp = np.zeros((len(blocks), causal_order_no + n_features * lags))
-        for j, block in enumerate(blocks):
-            obj[j] = block[0][i]
-            exp[j:] = np.concatenate([block[0][ancestor_indexes].flatten(), block[1:][:].flatten()], axis=0)
-        predictors = list(range(exp.shape[1]))
-        target = len(predictors)
-        X_con = np.concatenate([exp, obj.reshape(-1, 1)], axis=1)
-        coef = compute_adaptive_lasso(X_con, predictors, target)
-        B_taus[0][i, ancestor_indexes] = coef[:causal_order_no]
-        for j in range(len(B_taus[1:])):
-            B_taus[j + 1][i, :] = coef[causal_order_no + n_features * j:causal_order_no + n_features * j + n_features]
+    B_taus = np.array([B0])
+    for M in M_taus:
+        B_taus = np.append(B_taus, [np.dot((np.eye(n_features) - B0), M)], axis=0)
     return B_taus
 
 if __name__ == '__main__':
